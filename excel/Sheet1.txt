@@ -1,0 +1,638 @@
+' Amazon Extraction Master
+' For 64-bit systems
+
+Private Declare PtrSafe Function URLDownloadToFile Lib "urlmon" Alias "URLDownloadToFileA" (ByVal pCaller As LongPtr, ByVal szURL As String, ByVal szFileName As String, ByVal dwReserved As LongPtr, ByVal lpfnCB As LongPtr) As Long
+Function SearchSQL(IDValue As String, ByVal searchType As String, inv As String) As Variant
+
+    SearchSQL = Empty
+    Exit Function
+    
+    Dim conn As Object
+    Set conn = CreateObject("ADODB.Connection")
+    
+    ' Set your connection string
+    Dim strConn As String
+    strConn = "Provider=SQLOLEDB;Data Source=Main;Initial Catalog=ScannedItems;User ID=wangky;Password=Hs!8bl3?pO;"
+    
+    ' Open the connection
+    conn.Open strConn
+    
+    ' Determine which property to search based on searchType
+    Dim searchColumn As String
+    Select Case searchType
+        Case "ASIN"
+            searchColumn = "ASIN"
+        Case "FNSku"
+            searchColumn = "FNSku"
+        Case "UPC"
+            searchColumn = "UPC"
+        Case "EAN"
+            searchColumn = "EAN"
+        Case Else
+            MsgBox "Invalid search type."
+            SearchSQL = Empty
+            Set conn = Nothing
+            Exit Function
+    End Select
+    
+    ' Check if the ID property exists in the database
+    Dim strSQLCheck As String
+    strSQLCheck = "SELECT COUNT(*) FROM ItemTable WHERE " & searchColumn & " = ?;"
+    
+    Dim cmdCheck As Object
+    Set cmdCheck = CreateObject("ADODB.Command")
+    cmdCheck.ActiveConnection = conn
+    cmdCheck.CommandText = strSQLCheck
+    
+    Dim paramCheck As Object
+    Set paramCheck = cmdCheck.CreateParameter("IDParam", 200, 1, Len(IDValue), IDValue)
+    cmdCheck.Parameters.Append paramCheck
+    
+    Dim rsCheck As Object
+    Set rsCheck = cmdCheck.Execute
+    
+    If rsCheck.Fields(0).Value = 0 Then
+        ' If not found, try searching with modified value for UPC or EAN
+        If (searchColumn = "UPC" Or searchColumn = "EAN") Then
+            Dim modifiedValue As String
+            modifiedValue = Right(IDValue, Len(IDValue) - 1)
+            
+            strSQLCheck = "SELECT COUNT(*) FROM ItemTable WHERE " & searchColumn & " = ?;"
+            
+            Set cmdCheck = CreateObject("ADODB.Command")
+            cmdCheck.ActiveConnection = conn
+            cmdCheck.CommandText = strSQLCheck
+            
+            Set paramCheck = cmdCheck.CreateParameter("IDParam", 200, 1, Len(modifiedValue), modifiedValue)
+            cmdCheck.Parameters.Append paramCheck
+            
+            Set rsCheck = cmdCheck.Execute
+            
+            If rsCheck.Fields(0).Value = 0 Then
+                ' MsgBox "Item not found."
+                SearchSQL = Empty
+                rsCheck.Close
+                Set rsCheck = Nothing
+                Set cmdCheck = Nothing
+                Set conn = Nothing
+                Exit Function
+            End If
+        Else
+            ' MsgBox "Item not found."
+            SearchSQL = Empty
+            rsCheck.Close
+            Set rsCheck = Nothing
+            Set cmdCheck = Nothing
+            Set conn = Nothing
+            Exit Function
+        End If
+    End If
+    
+    rsCheck.Close
+    Set rsCheck = Nothing
+    Set cmdCheck = Nothing
+    
+    ' Prepare the SQL query with a parameter
+    Dim strSQL As String
+    strSQL = "SELECT Title, Price, ImagePath1, ImagePath2, ImagePath3, ImagePath4, ImagePath5, ImagePath6, ImagePath7 FROM ItemTable WHERE " & searchColumn & " = ?;" ' Use ? as a placeholder for the parameter
+    
+    Dim cmd As Object
+    Set cmd = CreateObject("ADODB.Command")
+    cmd.ActiveConnection = conn
+    cmd.CommandText = strSQL
+    
+    ' Create and define the parameter
+    Dim param As Object
+    Set param = cmd.CreateParameter("IDParam", 200, 1, Len(IDValue), IDValue) ' 200 corresponds to adVarChar, 1 corresponds to adParamInput
+    
+    ' Append the parameter to the command's parameters collection
+    cmd.Parameters.Append param
+    
+    ' Execute the command
+    Dim rs As Object
+    Set rs = cmd.Execute
+    
+    ' Read the values from the result set
+    Dim title As String
+    Dim price As Double
+    Dim imagePaths(1 To 7) As Variant ' Array to store image paths
+    
+    title = rs.Fields("Title").Value
+    price = rs.Fields("Price").Value
+    
+    ' Copy image files to destination folder
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    Dim destinationFolderPath As String
+    destinationFolderPath = "C:\Users\wangk\Documents\Auction3" ' Update with your destination folder path
+    
+    ' Populate the imagePaths array
+    For i = 1 To 7
+        If Not IsNull(rs.Fields("ImagePath" & i).Value) Then
+            imagePaths(i) = rs.Fields("ImagePath" & i).Value
+        Else
+            Exit For ' Exit the loop if a null value is encountered
+        End If
+    Next i
+    
+    ' Copy image files to destination folder
+    For i = 1 To 7
+        If Not IsEmpty(imagePaths(i)) Then
+            Dim destinationImagePath As String
+            destinationImagePath = destinationFolderPath & "\" & inv & "_" & i & ".jpg"
+            
+            fso.CopyFile imagePaths(i), destinationImagePath, True
+        End If
+    Next i
+    
+    SearchSQL = Array(title, price)
+    
+    ' Clean up
+    rs.Close
+    Set rs = Nothing
+    Set cmd = Nothing
+    Set conn = Nothing
+End Function
+
+Function IsAmazonProductPageValid(url As String) As Boolean
+    Dim httpRequest As Object
+    Dim responseStatus As Integer
+
+    On Error Resume Next ' Ignore error handling temporarily
+    
+    ' Create a new XMLHTTP object
+    Set httpRequest = CreateObject("MSXML2.XMLHTTP")
+    
+    ' Send a HEAD request to the URL
+    httpRequest.Open "HEAD", url, False
+    httpRequest.send
+    
+    ' Get the HTTP response status code
+    responseStatus = httpRequest.Status
+    
+    ' Check if the URL is valid (returns a status code between 200 and 399)
+    If responseStatus >= 200 And responseStatus <= 399 Then
+        IsAmazonProductPageValid = True
+    Else
+        IsAmazonProductPageValid = False
+    End If
+    
+    ' Clean up and release resources
+    Set httpRequest = Nothing
+    On Error GoTo 0 ' Restore error handling
+End Function
+' Parse JSON data using Scripting.Dictionary
+Function JSONParse(ByVal jsonString As String) As Object
+    Dim jsonObj As Object
+    With CreateObject("MSXML2.DOMDocument.6.0")
+        .LoadXML "<root>" & Replace$(Replace$(jsonString, "</", "</root><"), ">", ">") & "</root>"
+        Set jsonObj = CreateObject("Scripting.Dictionary")
+        ParseJSONDictionary .ChildNodes(1), jsonObj
+    End With
+    Set JSONParse = jsonObj
+End Function
+' Helper function to recursively parse JSON data
+Private Sub ParseJSONDictionary(xmlNode As Object, dict As Object)
+    Dim childNode As Object
+    For Each childNode In xmlNode.ChildNodes
+        If childNode.HasChildNodes Then
+            Dim childDict As Object
+            Set childDict = CreateObject("Scripting.Dictionary")
+            ParseJSONDictionary childNode, childDict
+            dict.Add childNode.nodeName, childDict
+        Else
+            dict.Add childNode.nodeName, childNode.Text
+        End If
+    Next childNode
+End Sub
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+
+    If runScript Then
+        On Error GoTo ErrorHandler
+        Application.EnableEvents = False
+        
+        Dim ws As Worksheet
+        Dim ws2 As Worksheet
+        Dim lastRow As Long
+        
+        Set ws = ThisWorkbook.Sheets("Extractor")
+        Set ws2 = ThisWorkbook.Sheets("Items")
+        
+        ' Get the last row where data was extracted (Column B is used as an example)
+        lastRow = ws.Cells(ws.Rows.count, "B").End(xlUp).Row
+
+        ' Check if the changed cell is in column A and is not empty
+        If Not Intersect(Target, ws.Range("A:A")) Is Nothing And Target.Value <> "" And Target.Row > lastRow Then
+            Const SHEET As String = "Items"
+            Const BCOL As String = "R:R"
+            Const UPC_COL As String = "S:S"
+            Const EAN_COL As String = "T:T"
+            Const LPN_COL As String = "AD:AD"
+            Const X_COL As String = "AC:AC"
+            Const OFFSET_X As Integer = -11
+            Const OFFSET_LPN As Integer = -12
+            Const OFFSET_PRICE As Integer = -10
+            Const AUCTION_NUM As Long = 30000
+            
+
+            Dim IE As Object
+            Dim HTMLDoc As Object
+            Dim title As String
+            Dim Description As String
+            Dim price As String
+            Dim rowNum As Long
+            Dim url As String
+
+            Dim id As String
+        
+            Dim searchValue As String
+            Dim searchRange As Range
+            Dim foundCell As Range
+            Dim valueInColumn As Variant
+            Dim offsetVal As Long
+            
+            Dim asin As String
+            Dim upc As String
+            Dim ean As String
+            Dim fnsku As String
+            Dim invNum As Long
+            
+            Dim sqlItem As Variant
+            Dim foundItem As Boolean
+            Dim haveImage As Boolean
+            
+            ' Close Internet Explorer in case of an error
+            If Not IE Is Nothing Then
+                IE.Quit
+                Set IE = Nothing
+                Set HTMLDoc = Nothing
+            End If
+        
+            id = Target.Value
+            rowNum = Target.Row
+            invNum = AUCTION_NUM + rowNum - 1
+            If Left(id, 1) = "B" Then
+                sqlItem = SearchSQL(id, "ASIN", CStr(invNum))
+                If IsEmpty(sqlItem) Then
+                    url = "https://www.amazon.ca/dp/" & id & "/" ' Construct the URL using the Product ID
+                    asin = id
+                    ' Set the sheet and range to search in
+                    Set searchRange = Sheets(SHEET).Range(BCOL)
+                    offsetVal = 0
+                    ' Search for the input value in the specified column
+                    Set foundCell = searchRange.Find(What:=id, LookIn:=xlValues, LookAt:=xlWhole)
+                    ' Check if the value was found
+                    If Not foundCell Is Nothing Then
+                        upc = foundCell.Offset(0, offsetVal + 1).Value
+                        ean = foundCell.Offset(0, offsetVal + 2).Value
+                        fnsku = foundCell.Offset(0, offsetVal - OFFSET_X).Value
+                        price = foundCell.Offset(0, offsetVal - OFFSET_PRICE).Value
+                        title = foundCell.Offset(0, offsetVal + 4).Value ' Title 4 to the right of ASIN
+                        foundItem = True
+                    End If
+                Else
+                    ' MsgBox sqlItem(0)
+                    title = sqlItem(0)
+                    price = sqlItem(1)
+                    foundItem = True
+                    haveImage = True
+                End If
+            ElseIf Left(id, 1) = "L" Then
+                ' Set the sheet and range to search in
+                Set searchRange = Sheets(SHEET).Range(LPN_COL)
+                offsetVal = OFFSET_LPN
+                ' Search for the input value in the specified column
+                Set foundCell = searchRange.Find(What:=id, LookIn:=xlValues, LookAt:=xlWhole)
+                ' Check if the value was found
+                If Not foundCell Is Nothing Then
+                    ' Get the value from the Q column in the same row as the matched value
+                    valueInColumn = foundCell.Offset(0, offsetVal).Value ' Offset(0, 10) refers to the 10th column to the left (column Q)
+                    asin = valueInColumn
+                    upc = foundCell.Offset(0, offsetVal + 1).Value
+                    ean = foundCell.Offset(0, offsetVal + 2).Value
+                    fnsku = foundCell.Offset(0, offsetVal - OFFSET_X).Value
+                    ' Display the results
+                    ' MsgBox "Value found in cell " & foundCell.Address & ": " & searchValue & vbCrLf & "Value in Q column: " & valueInQColumn, vbInformation
+                    id = valueInColumn
+                    
+                    sqlItem = SearchSQL(id, "ASIN", CStr(invNum))
+                    If IsEmpty(sqlItem) Then
+                        url = "https://www.amazon.ca/dp/" & id & "/" ' Construct the URL using the Product ID
+                        title = foundCell.Offset(0, offsetVal + 4).Value ' Title 4 to the right of ASIN
+                        price = foundCell.Offset(0, offsetVal - OFFSET_PRICE).Value
+                    Else
+                        title = sqlItem(0)
+                        price = sqlItem(1)
+                        haveImage = True
+                    End If
+                    foundItem = True
+                Else
+                    MsgBox "Barcode: " & id & " is not in Items sheet", vbExclamation
+                    ' Clear the cell in column A at the specified LastRow
+                    ws.Cells(rowNum, "A").ClearContents
+                    ' Select the cell after clearing its contents (optional)
+                    ws.Cells(rowNum, "A").Select
+                    
+                    Application.EnableEvents = True
+                    Exit Sub
+                End If
+                
+            ElseIf Left(id, 1) = "X" Then
+                sqlItem = SearchSQL(id, "FNSku", CStr(invNum))
+                If IsEmpty(sqlItem) Then
+                    ' Set the sheet and range to search in
+                    Set searchRange = Sheets(SHEET).Range(X_COL)
+                    offsetVal = OFFSET_X
+                    ' Search for the input value in the specified column
+                    Set foundCell = searchRange.Find(What:=id, LookIn:=xlValues, LookAt:=xlWhole)
+                    ' Check if the value was found
+                    If Not foundCell Is Nothing Then
+                        ' Get the value from the Q column in the same row as the matched value
+                        valueInColumn = foundCell.Offset(0, offsetVal).Value ' Offset(0, 10) refers to the 10th column to the left (column Q)
+                        asin = valueInColumn
+                        upc = foundCell.Offset(0, offsetVal + 1).Value
+                        ean = foundCell.Offset(0, offsetVal + 2).Value
+                        fnsku = foundCell.Offset(0, offsetVal - OFFSET_X).Value
+                        ' Display the results
+                        ' MsgBox "Value found in cell " & foundCell.Address & ": " & searchValue & vbCrLf & "Value in Q column: " & valueInQColumn, vbInformation
+                        id = valueInColumn
+                        url = "https://www.amazon.ca/dp/" & id & "/" ' Construct the URL using the Product ID
+                        title = foundCell.Offset(0, offsetVal + 4).Value ' Title 4 to the right of ASIN
+                        price = foundCell.Offset(0, offsetVal - OFFSET_PRICE).Value
+                        foundItem = True
+                    Else
+                        MsgBox "Barcode: " & id & " is not in Items sheet", vbExclamation
+                        ' Clear the cell in column A at the specified LastRow
+                        ws.Cells(rowNum, "A").ClearContents
+                        ' Select the cell after clearing its contents (optional)
+                        ws.Cells(rowNum, "A").Select
+                        
+                        Application.EnableEvents = True
+                        Exit Sub
+                    End If
+                Else
+                    title = sqlItem(0)
+                    price = sqlItem(1)
+                    foundItem = True
+                    haveImage = True
+                End If
+            
+            ElseIf IsNumeric(id) Then
+                sqlItem = SearchSQL(id, "UPC", CStr(invNum))
+                If IsEmpty(sqlItem) Then
+                    sqlItem = SearchSQL(id, "EAN", CStr(invNum))
+                    If IsEmpty(sqlItem) Then
+                        ' Set the sheet and range to search in
+                        Set searchRange = Sheets(SHEET).Range(EAN_COL)
+                        offsetVal = -2
+                        ' Search for the input value in the specified column
+                        Set foundCell = searchRange.Find(What:=Right(id, Len(id) - 1), LookIn:=xlFormulas, LookAt:=xlPart)
+                        ' Check if the value was found
+                        If Not foundCell Is Nothing Then
+                            ' Get the value from the Q column in the same row as the matched value
+                            valueInColumn = foundCell.Offset(0, offsetVal).Value ' Offset(0, 10) refers to the 10th column to the left (column Q)
+                            asin = valueInColumn
+                            upc = foundCell.Offset(0, offsetVal + 1).Value
+                            ean = foundCell.Offset(0, offsetVal + 2).Value
+                            fnsku = foundCell.Offset(0, offsetVal - OFFSET_X).Value
+                            ' Display the results
+                            ' MsgBox "Value found in cell " & foundCell.Address & ": " & searchValue & vbCrLf & "Value in Q column: " & valueInQColumn, vbInformation
+                            id = valueInColumn
+                            url = "https://www.amazon.ca/dp/" & id & "/" ' Construct the URL using the Product ID
+                            title = foundCell.Offset(0, offsetVal + 4).Value ' Title 4 to the right of ASIN
+                            price = foundCell.Offset(0, offsetVal - OFFSET_PRICE).Value
+                            foundItem = True
+                        Else
+                            ' Set the sheet and range to search in
+                            Set searchRange = Sheets(SHEET).Range(UPC_COL)
+                            offsetVal = -1
+                            ' Search for the input value in the specified column
+                            Set foundCell = searchRange.Find(What:=Right(id, Len(id) - 1), LookIn:=xlFormulas, LookAt:=xlPart)
+                            ' Check if the value was found
+                            If Not foundCell Is Nothing Then
+                                ' Get the value from the Q column in the same row as the matched value
+                                valueInColumn = foundCell.Offset(0, offsetVal).Value ' Offset(0, 10) refers to the 10th column to the left (column Q)
+                                asin = valueInColumn
+                                upc = foundCell.Offset(0, offsetVal + 1).Value
+                                ean = foundCell.Offset(0, offsetVal + 2).Value
+                                fnsku = foundCell.Offset(0, offsetVal - OFFSET_X).Value
+                                ' Display the results
+                                ' MsgBox "Value found in cell " & foundCell.Address & ": " & searchValue & vbCrLf & "Value in Q column: " & valueInQColumn, vbInformation
+                                id = valueInColumn
+                                url = "https://www.amazon.ca/dp/" & id & "/" ' Construct the URL using the Product ID
+                                title = foundCell.Offset(0, offsetVal + 4).Value ' Title 4 to the right of ASIN
+                                price = foundCell.Offset(0, offsetVal - OFFSET_PRICE).Value
+                                foundItem = True
+                            Else
+                                MsgBox "Barcode: " & id & " is not in Items sheet", vbExclamation
+                                ' Clear the cell in column A at the specified LastRow
+                                ws.Cells(rowNum, "A").ClearContents
+                                ' Select the cell after clearing its contents (optional)
+                                ws.Cells(rowNum, "A").Select
+                                
+                                Application.EnableEvents = True
+                                Exit Sub
+                                
+                            End If
+                        End If
+                    Else
+                        title = sqlItem(0)
+                        price = sqlItem(1)
+                        foundItem = True
+                        haveImage = True
+                    End If
+                Else
+                    title = sqlItem(0)
+                    price = sqlItem(1)
+                    foundItem = True
+                    haveImage = True
+                End If
+        
+            End If
+            
+            If (Not internetOff) Or (Not foundItem) Then
+                ' Create Internet Explorer instance
+                Set IE = CreateObject("InternetExplorer.Application")
+                IE.Visible = True
+        
+                ' Navigate to the Amazon item page
+                IE.navigate url
+                
+                ' Wait for the page to load completely
+                Do While IE.Busy Or IE.readyState <> 4 ' READYSTATE_COMPLETE
+                    DoEvents
+                Loop
+                
+                ' Get the HTML document
+                Set HTMLDoc = IE.Document
+                
+                On Error Resume Next ' Add error handling to continue the code even if elements are not found
+                
+                ' Simple validity check
+                Dim titleContent As String
+                titleContent = HTMLDoc.title
+                If (titleContent = "Page Not Found" Or StrComp(titleContent, "Amazon.com Page Not Found / Page Non Trouvée", vbTextCompare) = 0) Then
+                    url = "https://www.amazon.com/dp/" & id & "/" ' Construct the URL using the Product ID
+                    
+                    IE.navigate url
+                    ' Wait for the page to load completely
+                    Do While IE.Busy Or IE.readyState <> 4 ' READYSTATE_COMPLETE
+                        DoEvents
+                    Loop
+                    ' Get the HTML document
+                    Set HTMLDoc = IE.Document
+                    
+                    titleContent = HTMLDoc.title
+                    If titleContent = "Amazon.com Page Not Found" Then
+                        ' Close Internet Explorer
+                        If Not IE Is Nothing Then
+                            IE.Quit
+                            Set IE = Nothing
+                            Set HTMLDoc = Nothing
+                        End If
+                        
+                        ' Clear the cell in column A at the specified LastRow
+                        ws.Cells(rowNum, "A").ClearContents
+                        ' Select the cell after clearing its contents (optional)
+                        ws.Cells(rowNum, "A").Select
+                        
+                        MsgBox id & " is not on Amazon", vbExclamation
+                        
+                        Application.EnableEvents = True
+                        Exit Sub
+                    End If
+                End If
+                    
+                ' Extract the title
+                If title = "" Then
+                    title = HTMLDoc.getElementById("productTitle").innerText
+                End If
+                
+                ' MsgBox Title, vbInformation
+                
+                ' Extract the price
+                Dim priceOption As Object
+                Set priceOption = HTMLDoc.getElementsByClassName("a-price-whole")
+                If Not priceOption Is Nothing And priceOption.Length > 0 Then
+                    price = priceOption(0).innerText
+                    ' MsgBox Price, vbInformation
+                Else
+                    Set priceOption = HTMLDoc.getElementsByClassName("a-price a-text-price a-size-medium apexPriceToPay")
+                    If Not priceOption Is Nothing And priceOption.Length > 0 Then
+                        Dim positionOfDot As Long
+                        price = priceOption(0).innerText
+                        positionOfDot = InStr(price, ".")
+                        price = Mid(price, 2, positionOfDot - 2)
+                    Else
+                        price = "NA"
+                    End If
+                End If
+                
+                ' Close Internet Explorer after data extraction
+                If Not IE Is Nothing Then
+                    IE.Quit
+                    Set IE = Nothing
+                    Set HTMLDoc = Nothing
+                End If
+                
+                On Error GoTo 0 ' Reset error handling to default behavior
+            End If
+            
+            
+            If internetOff And (Not haveImage) Then
+                Dim pySheet As Worksheet
+                Dim lastPySheetRow As Long
+                
+                Set pySheet = ThisWorkbook.Sheets("NeedImage") ' Replace "SheetName" with the desired sheet name.
+                
+                lastPySheetRow = pySheet.Cells(pySheet.Rows.count, "A").End(xlUp).Row + 1
+                ' Write data to the last available row in columns A and B.
+                pySheet.Cells(lastPySheetRow, "A").Value = url
+                pySheet.Cells(lastPySheetRow, "B").Value = CStr(rowNum - 1)
+                
+            ElseIf (Not internetOff) And (Not haveImage) Then
+                ' Extract the main product images with python
+                ' Pass the URL to the Python script using Shell function
+                Dim pythonPath As String
+                Dim pythonScript As String
+                Dim cmd As String
+                
+                pythonPath = """C:\Users\wangk\AppData\Local\Programs\Python\Python311\python.exe"""  ' Replace with your Python executable path
+                pythonScript = """C:\Users\wangk\PycharmProjects\ExtractImage\main.py"""  ' Replace with your Python script path"
+                cmd = pythonPath & " " & pythonScript & " " & Chr(34) & url & Chr(34) & " " & Chr(34) & (rowNum - 1) & Chr(34)
+                
+                ' Run the Python script with the URL as a command-line argument
+                Dim wsh As Object
+                Set wsh = VBA.CreateObject("WScript.Shell")
+                wsh.Run cmd, 1, True
+                
+                ' Release resources
+                Set wsh = Nothing
+                
+                On Error GoTo 0 ' Reset error handling to default behavior
+            End If
+            
+            ' Check if data was successfully extracted before writing to Excel
+            If title <> "" And price <> "" Then
+                ' Write data to Excel
+                ws.Cells(rowNum, "B").Value = title ' Write Title to column B
+                ws.Cells(rowNum, "C").Value = title
+                If IsNumeric(price) Then
+                    If price >= 60 Then
+                        ws.Cells(rowNum, "C").Value = title & ". MSRP $" & price ' Write Description to column C"
+                    End If
+                End If
+                ws.Cells(rowNum, "D").Value = price ' Write Price to column D
+                ws.Cells(rowNum, "E").Value = rowNum - 1
+                
+                If asin <> "" Then
+                    ws.Cells(rowNum, "H").Value = asin
+                End If
+                If upc <> "" Then
+                    ws.Cells(rowNum, "I").Value = upc
+                End If
+                If ean <> "" Then
+                    ws.Cells(rowNum, "J").Value = ean
+                End If
+                If fnsku <> "" Then
+                    ws.Cells(rowNum, "K").Value = fnsku
+                End If
+                
+                ' Select the cell in the next row of column A for the next input
+                ws.Cells(rowNum + 1, "A").Select
+            Else
+                MsgBox "Data extraction failed for Product ID: " & Target.Value, vbExclamation
+            End If
+        
+            ' Update the last row where data was extracted
+            lastRow = Target.Row
+            
+            MsgBox "Extraction success"
+        End If
+        Application.EnableEvents = True
+        Exit Sub
+    End If
+    
+ErrorHandler:
+    ' MsgBox "An error occurred while extracting data. Please check the URL and the HTML element classes.", vbExclamation
+    If runScript Then
+        ' Close Internet Explorer in case of an error
+        If Not IE Is Nothing Then
+            IE.Quit
+            Set IE = Nothing
+            Set HTMLDoc = Nothing
+        End If
+        ' Release resources
+        Set wsh = Nothing
+        
+        Application.EnableEvents = True
+        Exit Sub
+    End If
+End Sub
+
+
+
+
+

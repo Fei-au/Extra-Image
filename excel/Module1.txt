@@ -1,0 +1,349 @@
+Public runScript As Boolean
+Public internetOff As Boolean
+Sub ToggleInternetSearch()
+    internetOff = Not internetOff
+End Sub
+
+Sub ToggleEventHandling()
+    runScript = Not runScript
+End Sub
+
+Sub CalculatePriceCategories()
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim priceRange As Range
+    Dim cell As Range
+    Dim under20 As Long, between20and50 As Long, between50and100 As Long, over100 As Long
+    Dim total As Double
+    Dim bidCell As Range
+    
+    ' Set the worksheet you are working with
+    Set ws = ThisWorkbook.Sheets("Extractor")
+    
+    ' Find the last row with data in column D
+    lastRow = ws.Cells(ws.Rows.count, "D").End(xlUp).Row
+    
+    ' Set the range containing prices (assuming it starts from D2)
+    Set priceRange = ws.Range("D2:D" & lastRow)
+    
+    ' Initialize counters
+    under20 = 0
+    between20and50 = 0
+    between50and100 = 0
+    over100 = 0
+    total = 0
+    
+    ' Loop through each cell in the price range
+    For Each cell In priceRange
+        If IsNumeric(cell.Value) Then
+            Set bidCell = cell.Offset(0, 2)
+            total = total + cell.Value
+            If cell.Value < 10 Then
+                under20 = under20 + 1
+                bidCell.Value = "1"
+            ElseIf cell.Value >= 10 And cell.Value <= 20 Then
+                under20 = under20 + 1
+                bidCell.Value = "2.5"
+            ElseIf cell.Value > 20 And cell.Value <= 50 Then
+                between20and50 = between20and50 + 1
+                bidCell.Value = "5"
+            ElseIf cell.Value > 50 And cell.Value <= 100 Then
+                between50and100 = between50and100 + 1
+                bidCell.Value = "10"
+            ElseIf cell.Value > 100 And cell.Value <= 200 Then
+                over100 = over100 + 1
+                bidCell.Value = "20"
+            Else
+                over100 = over100 + 1
+                bidCell.Value = "30"
+            End If
+        End If
+    Next cell
+    
+    ' Write the results to column N with combined description and value
+    ws.Range("N1").Value = "Price under $30: " & under30
+    ws.Range("N2").Value = "Price between $30 and $50: " & between30and50
+    ws.Range("N3").Value = "Price between $50 and $100: " & between50and100
+    ws.Range("N4").Value = "Price over $100: " & over100
+    ws.Range("N5").Value = "Total: " & total
+End Sub
+
+Sub DupTitle()
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim i As Long
+    
+    Set ws = ThisWorkbook.Sheets("Extractor") ' Change "YourSheetName" to the actual sheet name
+    
+    ' Find the last used row in column B
+    lastRow = ws.Cells(ws.Rows.count, "B").End(xlUp).Row
+    
+    ' Loop through each row in column B and copy the content to column C
+    For i = 2 To lastRow ' Start from row 2 assuming row 1 is a header
+        ws.Cells(i, "C").Value = ws.Cells(i, "B").Value
+    Next i
+End Sub
+
+Sub ExportScannedItems()
+    Dim sourceWorkbook As Workbook
+    Dim sourceSheet As Worksheet
+    Dim lastRow As Long
+    Dim cell As Range
+    Dim searchRange As Range
+    
+    Dim conn As Object
+    Dim rs As Object
+    Dim strConn As String
+    Dim strSQL As String
+    Dim rowNum As Long
+    Dim counter As Long
+    
+    Dim sourceFolderPath As String
+    Dim destinationFolderPath As String
+    Dim fso As Object ' FileSystemObject
+    Dim sourceFolder As Object
+    Dim destinationFolder As Object
+    Dim file As Object
+    Dim desiredPrefix As String
+    Dim filesToCopy As Collection
+    
+    ' Set your connection string
+    strConn = "Provider=SQLOLEDB;Data Source=Main;Initial Catalog=ScannedItems;User ID=wangky;Password=Hs!8bl3?pO;"
+    
+    ' Initialize the connection
+    Set conn = CreateObject("ADODB.Connection")
+    conn.Open strConn
+    
+    Set sourceWorkbook = ThisWorkbook
+    Set sourceSheet = sourceWorkbook.Sheets("Extractor") ' Change to your source sheet
+    ' Set source and destination folder paths
+    sourceFolderPath = "C:\Users\wangk\Documents\TestPhotos" ' Update with your source folder path
+    destinationFolderPath = "D:\Master\Photos" ' Update with your destination folder path
+    
+    ' Create a FileSystemObject
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' Get the source and destination folder objects
+    Set sourceFolder = fso.GetFolder(sourceFolderPath)
+    Set destinationFolder = fso.GetFolder(destinationFolderPath)
+    
+    ' Find the last row with data in the source sheet
+    lastRow = sourceSheet.Cells(sourceSheet.Rows.count, "H").End(xlUp).Row
+    
+    Set filesToCopy = New Collection
+    
+    ' Loop through the rows in the source sheet
+    For Each cell In sourceSheet.Range("H2:H" & lastRow) ' Assuming data starts from row 2
+        If Not IsEmpty(cell.Value) Then ' Check if the cell is not empty
+            ' Check if the ASIN exists in the database
+            strSQL = "SELECT COUNT(*) FROM ItemTable WHERE ASIN = ?;"  ' Use ? as a placeholder for the parameter
+            
+            Dim cmd As Object
+            Set cmd = CreateObject("ADODB.Command")
+            cmd.ActiveConnection = conn
+            cmd.CommandText = strSQL
+            
+            ' Create and define the parameter
+            Dim param As Object
+            Set param = cmd.CreateParameter("ASINParam", 200, 1, Len(cell.Value), cell.Value) ' 200 corresponds to adVarChar, 1 corresponds to adParamInput
+            
+            ' Append the parameter to the command's parameters collection
+            cmd.Parameters.Append param
+            
+            ' Execute the command
+            Set rs = cmd.Execute
+            
+            If rs.Fields(0).Value = 0 Then ' ASIN doesn't exist, proceed with insertion
+                On Error Resume Next ' Enable error handling for this block
+                
+                desiredPrefix = cell.Offset(0, -1).Value
+                
+                strSQL = "INSERT INTO ItemTable (ASIN, Inventory, Title, Price, UPC, EAN, FNSku) VALUES (?, ?, ?, ?, ?, ?, ?);"
+                cmd.CommandText = strSQL
+                
+                cmd.Parameters.Append cmd.CreateParameter("param1", 200, 1, 255, desiredPrefix)
+                cmd.Parameters.Append cmd.CreateParameter("param2", 200, 1, 255, cell.Offset(0, -6).Value)
+                cmd.Parameters.Append cmd.CreateParameter("param3", 200, 1, 255, cell.Offset(0, -4).Value)
+                cmd.Parameters.Append cmd.CreateParameter("param4", 200, 1, 255, cell.Offset(0, 1).Value)
+                cmd.Parameters.Append cmd.CreateParameter("param5", 200, 1, 255, cell.Offset(0, 2).Value)
+                cmd.Parameters.Append cmd.CreateParameter("param6", 200, 1, 255, cell.Offset(0, 3).Value)
+                
+                cmd.Execute
+                
+                counter = 1
+                ' Loop through each file in the source folder
+                For Each file In sourceFolder.Files
+                    ' Check if the file is an image and has the desired prefix
+                    If LCase(Left(file.Name, Len(desiredPrefix))) = desiredPrefix Then
+                    
+                        filesToCopy.Add file.Path
+                        
+                        ' Construct the SQL UPDATE statement for the rest of the columns
+                        Sql = "UPDATE ItemTable SET ImagePath" & counter & " = '" & destinationFolderPath & "\" & fso.GetFileName(file) & "' WHERE ASIN = '" & cell.Value & "'"
+                        
+                        ' Execute the SQL statement
+                        conn.Execute Sql
+                        
+                        counter = counter + 1
+                    End If
+                Next file
+            End If
+            
+            rs.Close ' Close the result set here, after both the insert and update operations
+        End If
+    Next cell
+
+    
+    ' Copy all collected files to the destination folder in a batch operation
+    Dim fileToCopy As Variant
+    For Each fileToCopy In filesToCopy
+        fso.CopyFile fileToCopy, destinationFolderPath & "\" & fso.GetFileName(fileToCopy), True
+    Next fileToCopy
+
+    ' Clean up
+    Set conn = Nothing
+    Set rs = Nothing
+    Set sourceFolder = Nothing
+    Set destinationFolder = Nothing
+    Set filesToCopy = Nothing
+    Set fso = Nothing
+
+End Sub
+
+Sub GetAmazonPricing()
+    Dim priceOption As Object
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim priceRange As Range
+    Dim cell As Range
+    Dim IE As Object
+    Dim HTMLDoc As Object
+    Dim completeRow As Long
+    Dim count As Integer
+    
+    Set ws = ThisWorkbook.Sheets("F3569-YVR3 - YYY000hq802")
+    
+    ' Find the last row with data in the source sheet
+    lastRow = ws.Cells(ws.Rows.count, "Q").End(xlUp).Row
+    completeRow = ws.Cells(ws.Rows.count, "AE").End(xlUp).Row + 1
+    
+    Set IE = CreateObject("InternetExplorer.Application")
+    IE.Visible = True
+    
+    ' Loop through the rows in the source sheet
+    For Each cell In ws.Range("Q" & completeRow & ":Q" & lastRow) ' Assuming data starts from last completed row
+        
+        If count = 16 Then
+            IE.Quit
+            Set IE = Nothing
+            Set HTMLDoc = Nothing
+            Application.Wait Now + TimeValue("0:00:30")
+            count = 0
+            Set IE = CreateObject("InternetExplorer.Application")
+            IE.Visible = True
+        End If
+            
+        ' Navigate to the Amazon item page
+        IE.navigate "https://www.amazon.ca/dp/" & cell.Value & "/"
+        ' Wait for the page to load completely
+        Do While IE.readyState <> 4 ' READYSTATE_COMPLETE
+            DoEvents
+        Loop
+        
+        ' Get the HTML document
+        Set HTMLDoc = IE.Document
+        
+        Set priceOption = HTMLDoc.getElementsByClassName("a-price-whole")
+        If priceOption Is Nothing Or priceOption.Length = 0 Then
+            Set priceOption = HTMLDoc.getElementsByClassName("a-offscreen")
+        End If
+        If Not priceOption Is Nothing And priceOption.Length > 0 Then
+            price = priceOption(0).innerText
+            If price <> "Page 1 of 1" Then
+                ws.Cells(cell.Row, "AE").Value = price
+            Else
+                ws.Cells(cell.Row, "AE").Value = cell.Offset(0, 10).Value
+            End If
+            ' MsgBox Price, vbInformation
+        Else
+            ' MsgBox "Price not found on the page.", vbExclamation
+            ws.Cells(cell.Row, "AE").Value = cell.Offset(0, 10).Value
+        End If
+        
+        Set priceOption = Nothing
+        count = count + 1
+        Application.Wait Now + TimeValue("0:00:03")
+        
+    Next cell
+    
+    IE.Quit
+    Set IE = Nothing
+    Set HTMLDoc = Nothing
+    
+End Sub
+
+Sub ExtractImages()
+    ' Extract the main product images with python
+    ' Pass the URL to the Python script using Shell function
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim i As Long
+    Dim count As Integer
+    Dim cell As Range
+    
+    Set ws = ThisWorkbook.Sheets("NeedImage") ' Replace "SheetName" with the actual sheet name
+    
+    ' Determine the last row with data in column A
+    lastRow = ws.Cells(ws.Rows.count, "A").End(xlUp).Row
+    Dim pythonPath As String
+    Dim pythonScript As String
+    Dim cmd As String
+    pythonPath = """C:\Users\wangk\AppData\Local\Programs\Python\Python311\python.exe"""  ' Replace with your Python executable path
+    pythonScript = """C:\Users\wangk\PycharmProjects\ExtractImage\main.py"""  ' Replace with your Python script path
+    
+    ' Loop through each cell in column A from the first row to the last row
+    For i = 1 To lastRow
+        If count = 15 Then
+            Application.Wait Now + TimeValue("0:01:00")
+            count = 0
+        End If
+        Dim wsh As Object
+        Set cell = ws.Cells(i, "A")
+        cmd = pythonPath & " " & pythonScript & " " & Chr(34) & cell.Value & Chr(34) & " " & Chr(34) & cell.Offset(0, 1).Value & Chr(34)
+        ' Run the Python script with the URL as a command-line argument
+        
+        Set wsh = VBA.CreateObject("WScript.Shell")
+        wsh.Run cmd, 1, True ' Change to False to not wait for the script to complete
+        ' Release resources
+        Set wsh = Nothing
+        count = count + 1
+        cell.Offset(0, 3).Value = "Ok"
+        Application.Wait Now + TimeValue("0:00:15")
+    Next i
+    
+End Sub
+
+Sub StartScan()
+    Dim i As Long
+    Dim uniqueCount As Integer
+    Dim lastRow As Long
+    Dim uniqueNumbers As New Collection
+    Dim ws As Worksheet
+    Dim cell As Range
+    
+    Set ws = ThisWorkbook.Sheets("invoice") ' Replace "SheetName" with the actual sheet name
+    ' Determine the last row with data in column A
+    lastRow = ws.Cells(ws.Rows.count, "A").End(xlUp).Row
+    
+    On Error Resume Next
+    For i = 2 To lastRow
+        Set cell = ws.Cells(i, "A")
+        ' Loop through the range and collect unique numbers
+        uniqueNumbers.Add cell.Value, CStr(cell.Value)
+    Next i
+    On Error GoTo 0
+    
+    uniqueCount = uniqueNumbers.count
+    MsgBox uniqueCount
+    
+End Sub
