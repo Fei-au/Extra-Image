@@ -106,5 +106,28 @@ item class
 
 
 
+
+
 # Web
+
+Photo download at night (only photo?)
+
+## Login
+
+Admin login
+
+## 
+
+## Main Page
+
+List all items
+
+- Order
+  - Added Time
+  - Price
+  - 
+
+- Modify all infomation
+
+
 
