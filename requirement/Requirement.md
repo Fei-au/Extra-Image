@@ -15,17 +15,22 @@ employees
 - user_id: employee id
 - time: create time
 - last_modify_time: time
-- item_number
 - BO
 - X
 - LPN
 - Code
+- case_number
+- item_number
 - title
 - images: image1, ... image10
 - image from: web / self
 - status
 - status note
 - class
+- size
+- color
+- price
+- bid_price
 
 ## Class
 
@@ -52,17 +57,21 @@ item class
 
 - Scanner
   1. Scan BO / X code
-  2. Create url
-  3. Check Amazon url, Home depot url, Walmart url exit or not
-     - Exit
-       - Input url automatically
-       - Click Grab
-       - Grab information from the web
-     - Not Exit
-       - Exit scanner and show the input box
-       - Input url
-       - Click Start
-     - **Do we have picture that not on the Internet? How do we deal with it?**
+  2. Search Database, whether exist the code
+  3. if not
+     1. Create url
+     2. Check Amazon url, Home depot url, Walmart url exit or not
+       1. Exit
+          1. Input url automatically
+          2. Click Grab
+          3. Grab information from the web
+       2. Not Exit
+          1. Exit scanner and show the input box
+          2. Input url
+          3. Click Start
+       3. **Do we have picture that not on the Internet? How do we deal with it?**
+  4. if has
+     1. grab information from database
 - Grabbed Information
   - Case number: required, input manually, keep the same for one time login
   - item_number: options, if input, check exist, if not input, create by user id range
@@ -74,5 +83,5 @@ item class
   - Status: required, selector(new, used), if used, add notes
   - Class: required, grab from web, if null, show selector
   - Size: only for shoes, clothes class
+  - Color: options, grab or not
   - Price: required, grab from web, if price is like 30 - 40, use the highest value
-  - Color: options 
