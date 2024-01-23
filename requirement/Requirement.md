@@ -9,7 +9,7 @@ employees
 - Account
 - Password
 
-# Item
+## Item
 
 - id, auto increment
 - user_id: employee id
@@ -53,7 +53,7 @@ item class
 - Account: from database user table, add manully
 - Password: from database user table, add manully
 
-# Main Page
+## Main Page
 
 - Scanner
   1. Scan BO / X code
@@ -72,16 +72,39 @@ item class
        3. **Do we have picture that not on the Internet? How do we deal with it?**
   4. if has
      1. grab information from database
+  
 - Grabbed Information
-  - Case number: required, input manually, keep the same for one time login
-  - item_number: options, if input, check exist, if not input, create by user id range
-    - from 10000 to 99999
-    - recursive it
-  - Title: required, from web
-  - Picture: required, from web, get first three pics. Add more by taking photo, **mostly taking 7 photos**
-    - name as item id_1.jpg ...
-  - Status: required, selector(new, used), if used, add notes
-  - Class: required, grab from web, if null, show selector
-  - Size: only for shoes, clothes class
-  - Color: options, grab or not
-  - Price: required, grab from web, if price is like 30 - 40, use the highest value
+
+  get all information, check database again with X, BO, LPN, Code, 
+
+  - if exist, **How do we update both info?**
+  - if not, following
+    - Case number: required, input manually, keep the same for one time login
+    - item_number: options, if input, check exist, if not input, create by user id range
+      - from 10000 to 99999
+      - recursive it
+    - Title: required, from web
+    - Picture: required, from web, get first three pics. Add more by taking photo, **mostly taking 7 photos**
+      - name as item id_1.jpg ...
+    - Status: required, selector(new, used), if used, add notes
+    - Class: required, grab from web, if null, show selector
+    - Size: only for shoes, clothes class
+    - Color: options, grab or not
+    - Price: required, grab from web, if price is like 30 - 40, use the highest value
+
+​	
+
+- save to DB, with user_id, add_time ......
+
+
+
+## My Page
+
+
+
+
+
+
+
+# Web
+
